@@ -36,10 +36,13 @@ export default function ConfessionBoard({ initialConfessions }: Props) {
     }
   }, []);
 
+  // Realtime channels
+  const confChannel = supabase.channel("public:confessions");
+  const reactChannel = supabase.channel("anonboard:reactions", { config: { broadcast: { self: true } } });
+
   // Listen for realtime INSERT events
   useEffect(() => {
-    const channel = supabase
-      .channel("public:confessions")
+    confChannel
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "confessions" },
@@ -48,10 +51,30 @@ export default function ConfessionBoard({ initialConfessions }: Props) {
           setConfessions((prev) => [confession, ...prev]);
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "confessions" },
+        (payload) => {
+          const updated = payload.new as Confession;
+          setConfessions((prev) => prev.map((c) => (c.id === updated.id ? { ...c, likes: updated.likes } : c)));
+        }
+      )
       .subscribe();
 
+    reactChannel.on("broadcast", { event: "reaction" }, ({ payload }) => {
+      const { id, emoji, count } = payload as { id: string; emoji: string; count: number };
+      setReactions((prev) => ({
+        ...prev,
+        [id]: { ...(prev[id] || {}), [emoji]: count }
+      }));
+    }).on("broadcast", { event: "like" }, ({ payload }) => {
+      const { id, likes } = payload as { id: string; likes: number };
+      setConfessions((prev) => prev.map((c) => (c.id === id ? { ...c, likes } : c)));
+    }).subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(confChannel);
+      supabase.removeChannel(reactChannel);
     };
   }, []);
 
@@ -74,38 +97,66 @@ export default function ConfessionBoard({ initialConfessions }: Props) {
     setPosting(false);
   };
 
-  const handleReact = (id: string, emoji: string) => {
+  const handleReact = async (id: string, emoji: string) => {
+    // Get current reactions first
     setReactions((prev) => {
       const entry = prev[id] ?? {};
-      const count = entry[emoji] ?? 0;
-      return { ...prev, [id]: { ...entry, [emoji]: count + 1 } };
+      const currentCount = entry[emoji] ?? 0;
+      const newCount = currentCount + 1;
+      
+      // Broadcast the new count
+      reactChannel.send({ 
+        type: 'broadcast', 
+        event: 'reaction', 
+        payload: { id, emoji, count: newCount } 
+      });
+      
+      return { 
+        ...prev, 
+        [id]: { ...entry, [emoji]: newCount } 
+      };
     });
   };
 
   const handleLike = async (id: string) => {
     if (likedIds.has(id)) return;
-    const current = confessions.find((c) => c.id === id)?.likes ?? 0;
 
-    // Optimistic UI update
-    setConfessions((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, likes: current + 1 } : c))
-    );
+    // Get current likes first
+    const { data: currentData } = await supabase
+      .from('confessions')
+      .select('likes')
+      .eq('id', id)
+      .single();
 
+    if (!currentData) return;
+
+    const newLikes = (currentData.likes || 0) + 1;
+
+    // Update with the new count
     const { error } = await supabase
       .from('confessions')
-      .update({ likes: current + 1 })
+      .update({ likes: newLikes })
       .eq('id', id);
 
     if (error) {
       console.error('Failed to like confession', error);
-      // rollback UI
-      setConfessions((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, likes: current } : c))
-      );
       return;
     }
 
-    setLikedIds((prev) => {
+    // Use the calculated new likes value
+    setConfessions(prev =>
+      prev.map(c => (c.id === id ? { ...c, likes: newLikes } : c))
+    );
+
+    // Broadcast to other clients
+    reactChannel.send({
+      type: 'broadcast',
+      event: 'like',
+      payload: { id, likes: newLikes },
+    });
+
+    // Update liked IDs
+    setLikedIds(prev => {
       const next = new Set(prev);
       next.add(id);
       if (typeof window !== 'undefined') {
