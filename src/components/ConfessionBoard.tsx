@@ -20,6 +20,8 @@ export default function ConfessionBoard({ initialConfessions }: Props) {
   );
   const [newConfession, setNewConfession] = useState<string>("");
   const [posting, setPosting] = useState(false);
+  const extraEmojis = ['😂', '😮', '😢'];
+  const [reactions, setReactions] = useState<Record<string, Record<string, number>>>({});
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
 
   // Load liked ids from localStorage
@@ -72,6 +74,14 @@ export default function ConfessionBoard({ initialConfessions }: Props) {
     setPosting(false);
   };
 
+  const handleReact = (id: string, emoji: string) => {
+    setReactions((prev) => {
+      const entry = prev[id] ?? {};
+      const count = entry[emoji] ?? 0;
+      return { ...prev, [id]: { ...entry, [emoji]: count + 1 } };
+    });
+  };
+
   const handleLike = async (id: string) => {
     if (likedIds.has(id)) return;
     const current = confessions.find((c) => c.id === id)?.likes ?? 0;
@@ -107,17 +117,17 @@ export default function ConfessionBoard({ initialConfessions }: Props) {
 
 
   return (
-    <main className="flex min-h-screen flex-col items-center p-4 bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+    <main className="flex min-h-screen flex-col items-center p-4 bg-[#0D0D0D] text-[#F0F0F0]">
       <div className="w-full max-w-2xl mx-auto py-8">
         <h1 className="text-4xl font-bold text-center mb-8">AnonBoard</h1>
 
         {/* Compose */}
         <form
           onSubmit={handleSubmit}
-          className="mb-8 p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md"
+          className="mb-8 p-6 bg-[#1A1A1A] rounded-lg shadow-md"
         >
           <textarea
-            className="w-full p-3 mb-4 border border-gray-300 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full p-3 mb-4 border border-gray-300 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-700 text-[#F0F0F0] focus:outline-none focus:ring-2 focus:ring-blue-500"
             rows={4}
             placeholder="Share your anonymous confession..."
             value={newConfession}
@@ -126,7 +136,7 @@ export default function ConfessionBoard({ initialConfessions }: Props) {
           />
           <button
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md transition duration-300 ease-in-out disabled:opacity-50"
+            className="w-full bg-[#FF5E5B] hover:opacity-90 text-white font-bold py-3 px-4 rounded-md transition duration-300 ease-in-out disabled:opacity-50"
             disabled={posting}
           >
             {posting ? "Posting..." : "Post Confession"}
@@ -143,19 +153,33 @@ export default function ConfessionBoard({ initialConfessions }: Props) {
           {confessions.map((c) => (
             <div
               key={c.id}
-              className="p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md"
+              className="p-6 bg-[#1A1A1A] rounded-lg shadow-md hover:shadow-lg transition-shadow"
             >
               <p className="text-lg mb-2 break-words">{c.content}</p>
-              <div className="flex justify-between items-center text-sm text-gray-500 dark:text-gray-400">
+              <div className="flex justify-between items-center text-sm text-[#AAAAAA]">
                 <span>{new Date(c.created_at).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</span>
                 <button
                   onClick={() => handleLike(c.id)}
                   disabled={likedIds.has(c.id)}
-                  className={`flex items-center space-x-1 transition duration-300 ease-in-out ${likedIds.has(c.id) ? 'text-red-400 cursor-not-allowed' : 'text-red-500 hover:text-red-600'}`}
+                  className={`flex items-center space-x-1 transition duration-300 ease-in-out ${likedIds.has(c.id) ? 'text-[#FF5E5B]/50 cursor-not-allowed' : 'text-[#FF5E5B] hover:opacity-80'}`}
                 >
                   <span>❤️</span>
                   <span>{c.likes ?? 0}</span>
                 </button>
+
+                {/* extra reactions */}
+                <div className="flex items-center space-x-2 ml-4">
+                  {extraEmojis.map((emo) => (
+                    <button
+                      key={emo}
+                      onClick={() => handleReact(c.id, emo)}
+                      className="transition-transform hover:scale-110"
+                    >
+                      {emo}
+                      <span className="ml-0.5 text-xs">{reactions[c.id]?.[emo] ?? 0}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           ))}
